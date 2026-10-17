@@ -1,17 +1,27 @@
-# Render deployment config.
+# Render deployment config (a "Blueprint").
 #
-# Render runs `pip install -r requirements.txt` then `streamlit run app.py`.
-# The custom build command installs CPU-only torch BEFORE that: the default
-# PyPI torch wheel resolves to a build with CUDA bindings, which is ~2.5GB and
-# cannot be installed on a free 512MB instance. `--no-deps` because
-# requirements.txt already pins sentence-transformers, and letting pip resolve
-# twice wastes the whole build.
+# Render reads this when you create a service with "Apply" from the dashboard,
+# or when you point Render at the repo and it detects the file.
+#
+# NO CUSTOM BUILD COMMAND, AND THAT IS THE POINT
+#   An earlier version installed CPU-only torch here, because the app used
+#   sentence-transformers. It no longer does - it uses ONNX Runtime, which was
+#   the swap that made the free tier viable (measured: 555MB with torch vs 226MB
+#   with ONNX, against a 512MB limit). Nothing imports torch or
+#   sentence-transformers any more, so installing torch would add ~2.5GB of
+#   download and several minutes to every build for a package that is never
+#   loaded. Letting Render run the default `pip install -r requirements.txt` is
+#   both simpler and faster.
 #
 # SERVICE TIER AND ITS ACTUAL LIMITS
-#   Free instance: 512MB RAM, sleeps after 15 min idle, ~30-60s cold start on
-#   first request. The catalogue embeddings are committed precisely so that cold
-#   start is "load 1MB of JSON + load MiniLM", not "load MiniLM and encode 269
-#   clips".
+#   Free instance: 512MB RAM, sleeps after 15 min idle, and the first request
+#   after a sleep takes 30-60s to boot the ~130MB embedding model. That is fine
+#   for a visitor who waits, but it means you should test it COLD before
+#   sending the link to anyone.
+#
+#   Measured peak RSS on this code is ~226MB (scripts/check_memory.py), which
+#   leaves ~286MB of headroom. If a deploy ever starts dying mid-request, that
+#   headroom is the first thing to re-check.
 
 services:
   - type: web
@@ -19,16 +29,19 @@ services:
     runtime: python
     plan: free
     region: oregon
-    buildCommand: >
-      pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-      && pip install --no-cache-dir -r requirements.txt
+    # Default start command is `python app.py`, which would start nothing —
+    # this is a Streamlit app, so the command must say so.
     startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0
     healthCheckPath: /_stcore/health
+    autoDeploy: true
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
+      # Sentence tokenisers fork on every encode otherwise; harmless, but it
+      # wastes memory we are measurably short of.
       - key: TOKENIZERS_PARALLELISM
         value: "false"
-      # Streamlit reads its theme and telemetry settings from here.
+      - key: OMP_NUM_THREADS
+        value: "1"
       - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
         value: "false"
