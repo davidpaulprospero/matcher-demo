@@ -3,15 +3,15 @@
 # Render reads this when you create a service with "Apply" from the dashboard,
 # or when you point Render at the repo and it detects the file.
 #
-# NO CUSTOM BUILD COMMAND, AND THAT IS THE POINT
-#   An earlier version installed CPU-only torch here, because the app used
-#   sentence-transformers. It no longer does - it uses ONNX Runtime, which was
-#   the swap that made the free tier viable (measured: 555MB with torch vs 226MB
-#   with ONNX, against a 512MB limit). Nothing imports torch or
-#   sentence-transformers any more, so installing torch would add ~2.5GB of
+# NO TORCH, AND THAT IS THE POINT
+#   An earlier version installed CPU-only torch in the build command, because
+#   the app used sentence-transformers. It no longer does - it uses ONNX
+#   Runtime, which was the swap that made the free tier viable (measured: 555MB
+#   with torch vs 226MB with ONNX, against a 512MB limit). Nothing imports torch
+#   or sentence-transformers any more, so installing torch would add ~2.5GB of
 #   download and several minutes to every build for a package that is never
-#   loaded. Letting Render run the default `pip install -r requirements.txt` is
-#   both simpler and faster.
+#   loaded. The build command below is the plain default, and that is the whole
+#   of it.
 #
 # SERVICE TIER AND ITS ACTUAL LIMITS
 #   Free instance: 512MB RAM, sleeps after 15 min idle, and the first request
@@ -35,6 +35,17 @@ services:
     # found, but there was an issue" and no useful detail. Worth knowing because
     # the failure is silent-ish: the YAML looks fine and the dashboard gives no
     # line number.
+    # The build command is spelled out rather than left to Render's default, and
+    # that is not tidiness — it is the fix for a deploy that failed with
+    # "streamlit: command not found". An earlier version of this file installed
+    # CPU-only torch here; removing that key left Render's Build Command field
+    # EMPTY rather than unset, and an empty field is not "use the default", it is
+    # "run nothing". The build succeeded in 17s without ever pip-installing
+    # anything, so the start command had no streamlit binary to run.
+    #
+    # The default, if it applied, is `pip install -r requirements.txt` — which is
+    # exactly what is written here.
+    buildCommand: pip install -r requirements.txt
     # Default start command is `python app.py`, which would start nothing —
     # this is a Streamlit app, so the command must say so.
     #
