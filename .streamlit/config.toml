@@ -8,14 +8,14 @@
 [server]
 headless = true
 
+# Default is 200MB, which is generous for the .srt upload this accepts.
+maxUploadSize = 5
+
 [browser]
 # The app asks for nothing: no API key, no external service. A usage-statistics
 # ping to Streamlit's servers is not something a portfolio demo should make on a
 # visitor's behalf.
 gatherUsageStats = false
-
-# Default is 200MB, which is generous for the .srt upload this accepts.
-maxUploadSize = 5
 
 # NOTE: fileWatcherType is deliberately left at its default ("auto"). Turning it
 # off would save a little CPU on the deployed container, but it also kills hot
