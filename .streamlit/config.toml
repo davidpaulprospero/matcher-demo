@@ -1,0 +1,23 @@
+# Streamlit configuration, tracked in the repo so the deployed app behaves the
+# same as the local one.
+#
+# Without `headless = true` Streamlit tries to open a system browser on start.
+# That is harmless locally and wrong on a server, where there is no browser and
+# the attempt just delays boot.
+
+[server]
+headless = true
+
+[browser]
+# The app asks for nothing: no API key, no external service. A usage-statistics
+# ping to Streamlit's servers is not something a portfolio demo should make on a
+# visitor's behalf.
+gatherUsageStats = false
+
+# Default is 200MB, which is generous for the .srt upload this accepts.
+maxUploadSize = 5
+
+# NOTE: fileWatcherType is deliberately left at its default ("auto"). Turning it
+# off would save a little CPU on the deployed container, but it also kills hot
+# reload locally, and local reload is where the work happens. Cold-start time is
+# dominated by the ONNX model download (measured 8.6s), not by file watching.

@@ -4,6 +4,12 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
+# Secrets. There are none this app needs — it makes no network calls and reads
+# no credentials — but the file must never be committed if that ever changes.
+.env
+.env.*
+!.env.example
+
 # Virtualenv
 .venv/
 venv/
@@ -12,7 +18,10 @@ venv/
 .streamlit/secrets.toml
 
 # Model cache. The catalogue embeddings ARE committed (see README) but the
-# MiniLM weights are downloaded at runtime and must not be committed.
+# ONNX weights are downloaded at runtime and must not be committed — they are
+# ~65MB and would bloat every clone of a repo whose whole point is the code.
+model_cache/
+.model_cache/
 models/
 .cache/
 

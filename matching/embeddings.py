@@ -28,6 +28,7 @@ than "load a model and encode 269 clips".
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import List, Sequence
 
@@ -37,6 +38,10 @@ import numpy as np
 MODEL_NAME = "BAAI/bge-small-en-v1.5"
 EMBEDDING_DIM = 384
 
+# Where the ONNX weights live. Inside the project so it is visible and can be
+# pointed elsewhere by env var, and so a wiped container reuses nothing stale.
+DEFAULT_CACHE_DIR = Path(__file__).resolve().parent.parent / ".model_cache"
+
 _model = None
 
 
@@ -45,12 +50,20 @@ def get_model():
 
     A Streamlit server reuses one process across sessions, so this is a dict
     lookup after the first request rather than a 130MB load every time.
+
+    The cache directory is explicit. Left to itself fastembed picks a per-user
+    temp path, which is fine locally and unpredictable on a host — and the
+    cache location is what decides whether a woken container reuses a warm
+    model or downloads ~65MB again before it can answer anything.
     """
     global _model
     if _model is None:
         from fastembed import TextEmbedding
 
-        _model = TextEmbedding(MODEL_NAME)
+        cache = Path(os.environ.get("FASTEMBED_CACHE_DIR", DEFAULT_CACHE_DIR))
+        cache.mkdir(parents=True, exist_ok=True)
+
+        _model = TextEmbedding(MODEL_NAME, cache_dir=str(cache))
     return _model
 
 

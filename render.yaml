@@ -29,9 +29,17 @@ services:
     runtime: python
     plan: free
     region: oregon
+    # Render's default Python moves over time, and the pinned wheels below
+    # (numpy 2.2.6, fastembed 0.7.3) are resolved against a specific ABI. Naming
+    # the version means a deploy in six months builds what was tested here rather
+    # than whatever the platform default happens to be that week.
+    pythonVersion: "3.12"
     # Default start command is `python app.py`, which would start nothing —
     # this is a Streamlit app, so the command must say so.
-    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0
+    #
+    # --server.headless is also in .streamlit/config.toml, but repeating it here
+    # means the container still starts correctly if that file is ever lost.
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
     healthCheckPath: /_stcore/health
     autoDeploy: true
     envVars:
@@ -45,3 +53,10 @@ services:
         value: "1"
       - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
         value: "false"
+      # Where the ONNX weights are cached. Set explicitly because the free tier
+      # has no persistent disk: the model is re-downloaded (~65MB, measured 8.6s
+      # on this connection) every time the container wakes from a 15-minute
+      # sleep. That download is the entire cold-start cost, so it is worth
+      # knowing about rather than discovering as a "site is down" report.
+      - key: FASTEMBED_CACHE_DIR
+        value: "/tmp/fastembed_cache"
