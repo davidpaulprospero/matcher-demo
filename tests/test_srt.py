@@ -2,7 +2,7 @@
 
 import pytest
 
-from matching.srt import load_srt, merge_short_segments, parse_srt
+from matching.srt import load_srt, merge_short_segments, parse_plain_text, parse_srt
 
 BASIC = """1
 00:00:00,000 --> 00:00:04,000
@@ -99,3 +99,87 @@ def test_indices_are_renumbered_after_merge():
 def test_load_srt_combines_both():
     merged = load_srt(BASIC)
     assert len(merged) == 3
+
+# --- Plain pasted text -----------------------------------------------------
+# The app offers a "Paste text" option, so pasting ordinary prose has to match
+# rather than error. These pin that, and pin that it does NOT change how a real
+# .srt is parsed.
+
+
+def test_plain_prose_is_matched_not_rejected():
+    text = "A sunrise over a busy city street.\nNobody speaks in this scene."
+    segments = load_srt(text)
+    assert len(segments) == 2
+    assert segments[0].text == "A sunrise over a busy city street."
+    assert segments[1].text == "Nobody speaks in this scene."
+
+
+def test_plain_text_segments_do_not_overlap_or_merge():
+    # Each pasted line is its own sentence and must stay its own shot. If
+    # PLAIN_LINE_SECONDS ever dropped below MIN_SEGMENT_SECONDS, merge_short_
+    # segments would fold neighbours together and one sentence would be matched
+    # against one shot.
+    segments = load_srt("One line here.\nTwo line here.\nThree line here.")
+    assert len(segments) == 3
+    for a, b in zip(segments, segments[1:]):
+        assert a.end <= b.start
+
+
+def test_plain_text_timeline_is_monotonic():
+    segments = load_srt("Alpha.\nBeta.\nGamma.")
+    assert [s.index for s in segments] == [0, 1, 2]
+    assert segments == sorted(segments, key=lambda s: s.start)
+
+
+def test_blank_lines_are_ignored_not_matched():
+    segments = load_srt("Real line.\n\n\n   \nAnother real line.")
+    assert len(segments) == 2
+
+
+def test_real_srt_still_parses_exactly_as_before():
+    # The fallback only fires when parse_srt finds nothing, so a real file is
+    # untouched by it.
+    assert load_srt(BASIC) == merge_short_segments(parse_srt(BASIC))
+
+
+def test_srt_with_timing_is_never_treated_as_plain_text():
+    # If this were falling through to parse_plain_text, the timing lines and the
+    # index would each become a matched sentence. It doesn't: the short cue
+    # merges forward into its neighbour exactly as a real .srt does.
+    text = "1\n00:00:00,000 --> 00:00:01,000\nShort one.\n\n2\n00:00:01,000 --> 00:00:06,000\nLong one.\n"
+    segments = load_srt(text)
+    assert len(segments) == 1
+    assert segments[0].text == "Short one. Long one."
+    assert segments[0].start == 0.0 and segments[0].end == 6.0
+
+
+def test_single_pasted_line_with_no_newline():
+    segments = load_srt("Just one line, no trailing newline")
+    assert len(segments) == 1
+    assert segments[0].text == "Just one line, no trailing newline"
+
+
+def test_html_tags_are_stripped_from_plain_lines():
+    segments = load_srt("<i>Italic line.</i>\n{\an8} Positioned line.")
+    assert [s.text for s in segments] == ["Italic line.", "Positioned line."]
+
+
+def test_plain_text_durations_are_marked_as_estimated():
+    # Printing a guessed "3.0s" as though it were measured would be a fabricated
+    # number, so pasted lines render with a "~" and real .srt cues do not.
+    pasted = load_srt("One line.\nTwo lines.")
+    assert all(s.estimated_timing for s in pasted)
+    assert all(s.duration_label.startswith("~") for s in pasted)
+
+    real = load_srt(BASIC)
+    assert not any(s.estimated_timing for s in real)
+    assert all(not s.duration_label.startswith("~") for s in real)
+
+
+def test_estimated_flag_survives_merging():
+    # PLAIN_LINE_SECONDS >= MIN_SEGMENT_SECONDS means pasted lines never merge,
+    # but if that ever changed the flag must not be dropped on the way through.
+    segments = parse_plain_text("A.\nB.\nC.", seconds_per_line=1.0)
+    assert all(s.estimated_timing for s in segments)
+    merged = merge_short_segments(segments, min_seconds=3.0)
+    assert merged and all(s.estimated_timing for s in merged)

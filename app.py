@@ -81,7 +81,7 @@ def render_placement(placement: Placement, config: PipelineConfig) -> None:
 
     header = (
         f"{score_style(placement.score)} **Line {seg.index + 1}** "
-        f"· {seg.duration:.1f}s · score {placement.score:.3f}"
+        f"· {seg.duration_label} · score {placement.score:.3f}"
     )
     if weak:
         header += "  · ⚠ low"
@@ -196,7 +196,10 @@ def main() -> None:
         upload = st.file_uploader("SubRip file", type=["srt", "txt"])
         srt_text = upload.getvalue().decode("utf-8", errors="replace") if upload else ""
     else:
-        srt_text = st.text_area("SubRip format", height=220, value="")
+        srt_text = st.text_area(
+            "Script text — one line per shot, or SubRip with timing lines",
+            height=220, value="",
+        )
 
     if not srt_text.strip():
         st.info("Load the sample or paste a script to see matches.")
@@ -205,7 +208,10 @@ def main() -> None:
     segments = load_srt(srt_text)
 
     if not segments:
-        st.error("No subtitle cues found. Check the file has timing lines.")
+        st.error(
+            "Nothing matchable in that text. Use one sentence per line, "
+            "or paste SubRip including its timing lines."
+        )
         return
 
     run = st.button("Match this script", type="primary")

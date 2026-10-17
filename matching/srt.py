@@ -29,6 +29,11 @@ _INDEX = re.compile(r"^\d+$")
 # usually ~2s; a line you could read in one breath is ~3s.
 MIN_SEGMENT_SECONDS = 3.0
 
+# Guessed length of one pasted line when the input has no timing at all. Must be
+# >= MIN_SEGMENT_SECONDS, or merge_short_segments would fold neighbouring pasted
+# lines together and silently match one sentence against one shot.
+PLAIN_LINE_SECONDS = 3.0
+
 # Tags a subtitling tool leaves behind (<i>, {\an8}, ASS overrides).
 _TAGS = re.compile(r"<[^>]+>|\{[^}]*\}")
 
@@ -41,10 +46,19 @@ class Segment:
     start: float
     end: float
     text: str
+    # True when start/end were invented (pasted plain text) rather than read from
+    # a real .srt. The variety tracker needs an ordered timeline either way, but
+    # the UI must not print a guessed duration as though it were measured.
+    estimated_timing: bool = False
 
     @property
     def duration(self) -> float:
         return self.end - self.start
+
+    @property
+    def duration_label(self) -> str:
+        """Duration as shown to a user, marked when it is a guess."""
+        return "~%.1fs" % self.duration if self.estimated_timing else "%.1fs" % self.duration
 
     def __repr__(self) -> str:  # pragma: no cover - display only
         return f"Segment({self.index}, {self.start:.1f}-{self.end:.1f}, {self.text!r})"
@@ -114,8 +128,11 @@ def merge_short_segments(segments: List[Segment], min_seconds: float = MIN_SEGME
 
     for seg in segments:
         if pending is not None:
+            # Estimated survives the merge: if either half was invented, the
+            # combined span still is.
             seg = Segment(pending.index, pending.start, seg.end,
-                          f"{pending.text} {seg.text}".strip())
+                          f"{pending.text} {seg.text}".strip(),
+                          estimated_timing=pending.estimated_timing or seg.estimated_timing)
 
         is_last = seg.index == segments[-1].index
         if seg.duration < min_seconds and not is_last:
@@ -128,9 +145,46 @@ def merge_short_segments(segments: List[Segment], min_seconds: float = MIN_SEGME
     if pending is not None:
         merged.append(pending)
 
-    return [Segment(i, s.start, s.end, s.text) for i, s in enumerate(merged)]
+    return [Segment(i, s.start, s.end, s.text, estimated_timing=s.estimated_timing)
+            for i, s in enumerate(merged)]
+
+
+def parse_plain_text(content: str, seconds_per_line: float = PLAIN_LINE_SECONDS) -> List[Segment]:
+    """Treat each non-empty line as one segment, with invented timing.
+
+    The app offers a "Paste text" option next to "Upload a .srt", so pasting
+    ordinary prose has to do something sensible. `parse_srt` returns nothing for
+    it — no arrow, no timing — and the app used to answer "No subtitle cues
+    found", which reads as the paste failing when in fact the user did exactly
+    what the UI invited.
+
+    The timestamps here are NOT real. They are a fixed per-line guess, and they
+    exist because the variety tracker needs an ordered timeline to reason about.
+    A long pasted script therefore occupies more wall-clock than it would in
+    reality, and the window rule bites harder than it would on a real .srt. That
+    is the conservative direction: it makes the tool look *more* repetitive, so
+    it cannot flatter the output it came from.
+    """
+    segments: List[Segment] = []
+    for raw in content.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        text = re.sub(r"\s+", " ", _TAGS.sub("", raw)).strip()
+        if not text:
+            continue
+        start = len(segments) * seconds_per_line
+        segments.append(Segment(len(segments), start, start + seconds_per_line, text,
+                                estimated_timing=True))
+    return segments
 
 
 def load_srt(content: str, min_seconds: float = MIN_SEGMENT_SECONDS) -> List[Segment]:
-    """Parse and shape in one call. This is what the app uses."""
-    return merge_short_segments(parse_srt(content), min_seconds=min_seconds)
+    """Parse and shape in one call. This is what the app uses.
+
+    Falls back to `parse_plain_text` when the input has no timing lines at all,
+    so pasted prose is matched rather than rejected. Real .srt always parses,
+    so this fallback cannot change how a real file is handled — it only rescues
+    input that would otherwise return an empty list.
+    """
+    segments = parse_srt(content)
+    if not segments:
+        segments = parse_plain_text(content)
+    return merge_short_segments(segments, min_seconds=min_seconds)
