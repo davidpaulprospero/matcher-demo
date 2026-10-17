@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtualenv
+.venv/
+venv/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Model cache. The catalogue embeddings ARE committed (see README) but the
+# MiniLM weights are downloaded at runtime and must not be committed.
+models/
+.cache/
+
+# Real footage. This demo has none, but if you point it at your own media it
+# should never reach the repo.
+*.mp4
+*.mov
+*.mkv

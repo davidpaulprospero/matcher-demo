@@ -1,0 +1,289 @@
+"""Streamlit UI for the stock-footage matcher.
+
+Deliberately not fancy. The thing worth demonstrating is the pipeline, so the
+UI shows its reasoning rather than hiding it: for every voiceover line it shows
+the complexity score, the candidate pool size, what the variety window blocked,
+the reuse penalty applied, and the runner-up. A bad match you can explain is
+more useful than a good match you can't.
+
+Run locally:  streamlit run app.py
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import streamlit as st
+
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
+
+from matching import (  # noqa: E402
+    EmbeddingSearch,
+    Matcher,
+    PipelineConfig,
+    SearchConfig,
+    load_srt,
+)
+from matching.embeddings import MODEL_NAME, load_catalog, load_embeddings  # noqa: E402
+from matching.pipeline import Placement  # noqa: E402
+
+CATALOG_PATH = ROOT / "data" / "catalog.json"
+EMBEDDINGS_PATH = ROOT / "data" / "embeddings.json"
+SAMPLE_PATH = ROOT / "data" / "sample.srt"
+
+
+@st.cache_resource
+def load_engine():
+    """Catalogue, embeddings and search. Loaded once per server process.
+
+    `cache_resource` rather than `cache_data`: this holds the search object and
+    the numpy matrix, which are expensive to build and not worth pickling.
+    """
+    catalog = load_catalog(CATALOG_PATH)
+    embeddings = load_embeddings(EMBEDDINGS_PATH)
+
+    if embeddings.shape[0] != len(catalog["clips"]):
+        st.error(
+            "Catalogue and embeddings disagree. Re-run "
+            "`python scripts/build_embeddings.py`."
+        )
+        st.stop()
+
+    search = EmbeddingSearch(catalog["clips"], embeddings)
+    return catalog, search
+
+
+def score_style(score: float) -> str:
+    if score >= 0.55:
+        return "🟢"
+    if score >= 0.35:
+        return "🟡"
+    return "🔴"
+
+
+def render_placement(placement: Placement, config: PipelineConfig) -> None:
+    seg = placement.segment
+
+    if not placement.matched:
+        st.warning(
+            f"**Line {seg.index + 1}** — no clip could be assigned. "
+            "Every candidate was either over its reuse limit or blocked by the "
+            "variety window. A gap is recorded rather than filled with a bad "
+            "match."
+        )
+        return
+
+    clip = placement.clip
+    weak = placement.score < config.low_score_threshold
+
+    header = (
+        f"{score_style(placement.score)} **Line {seg.index + 1}** "
+        f"· {seg.duration:.1f}s · score {placement.score:.3f}"
+    )
+    if weak:
+        header += "  · ⚠ low"
+    if placement.variety_degraded:
+        header += "  · 🔁 variety rule relaxed"
+
+    with st.container(border=weak):
+        st.markdown(header)
+        st.caption(seg.text)
+
+        st.markdown(f"**→** {clip['caption']}")
+        st.caption(
+            f"`{clip['id']}` · {clip['camera']} · "
+            f"{clip['source'].split('/')[-1]} · "
+            f"{clip['start_time']:.1f}s–{clip['start_time'] + clip['duration']:.1f}s"
+        )
+
+        # Why this clip and not another. Collapsed by default so the main table
+        # stays readable, but present — unexplained scores are the thing that
+        # makes a matcher impossible to trust or tune.
+        with st.expander("why this clip"):
+            cols = st.columns(4)
+            cols[0].metric("line complexity", f"{placement.complexity:.2f}")
+            cols[1].metric("candidate pool", placement.pool_size)
+            cols[2].metric(
+                "reuse penalty", f"−{placement.base_score - placement.score:.3f}"
+            )
+            cols[3].metric("blocked by window", placement.blocked_by_variety)
+
+            st.caption(
+                "Generic lines get a wider candidate pool; specific lines get a "
+                "narrower one. The score shown is after reuse penalties — the "
+                "raw similarity is higher."
+            )
+            if placement.variety_degraded:
+                st.caption(
+                    "Every source video was already used inside the variety "
+                    "window, so the rule was applied as a penalty rather than "
+                    "an exclusion. A repeated shot beats an empty slot."
+                )
+            if placement.runner_up:
+                st.caption(f"Runner-up: {placement.runner_up['caption']}")
+
+
+def main() -> None:
+    st.set_page_config(page_title="Stock Footage Matcher", page_icon="🎬", layout="wide")
+
+    st.title("Stock Footage Matcher")
+    st.markdown(
+        "Paste a voiceover script, and this picks stock footage for each line "
+        "using local sentence embeddings — no API key, no network calls."
+    )
+
+    catalog, search = load_engine()
+
+    # Say what the data is, at the top, before any result. A synthetic corpus
+    # presented without that label would be a fake dataset.
+    st.info(
+        f"**The footage is synthetic.** These {catalog['clip_count']} captions were "
+        f"generated by `scripts/generate_corpus.py` from a fixed seed — they are "
+        f"not scraped from Pexels, Unsplash or any other stock library, and no "
+        f"real video exists behind these IDs. The matching logic is real; the "
+        f"catalogue is a stand-in.",
+        icon="⚠️",
+    )
+
+    with st.sidebar:
+        st.header("Settings")
+
+        max_per_source = st.slider(
+            "Max clips per source video", 1, 8, 3,
+            help="Caps how many shots can come from one shoot. Raise it for "
+                 "more source diversity in the search pool.",
+        )
+        base_candidates = st.slider(
+            "Base candidate pool", 5, 60, 20,
+            help="Pool size before complexity scaling. Generic lines get up to "
+                 "50% more than this; specific lines get fewer.",
+        )
+        max_reuse = st.slider("Times one clip may repeat", 1, 5, 2)
+        window_minutes = st.slider(
+            "Variety window (minutes)", 1, 30, 10,
+            help="Within this window, a source video can be used at most once.",
+        )
+
+        st.header("Corpus")
+        st.metric("synthetic clips", catalog["clip_count"])
+        st.metric("source videos", len({c["source"] for c in catalog["clips"]}))
+        st.metric("embedding model", MODEL_NAME)
+
+    pipeline_config = PipelineConfig(
+        search=SearchConfig(
+            embedding_candidates=base_candidates,
+            max_candidates_per_source=max_per_source,
+        ),
+        max_reuse=max_reuse,
+        timeline_window=window_minutes * 60.0,
+    )
+
+    st.subheader("Voiceover")
+
+    default_text = SAMPLE_PATH.read_text(encoding="utf-8") if SAMPLE_PATH.exists() else ""
+    source = st.radio(
+        "Script", ["Use the sample", "Upload a .srt", "Paste text"],
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+
+    if source == "Use the sample":
+        srt_text = default_text
+    elif source == "Upload a .srt":
+        upload = st.file_uploader("SubRip file", type=["srt", "txt"])
+        srt_text = upload.getvalue().decode("utf-8", errors="replace") if upload else ""
+    else:
+        srt_text = st.text_area("SubRip format", height=220, value="")
+
+    if not srt_text.strip():
+        st.info("Load the sample or paste a script to see matches.")
+        return
+
+    segments = load_srt(srt_text)
+
+    if not segments:
+        st.error("No subtitle cues found. Check the file has timing lines.")
+        return
+
+    run = st.button("Match this script", type="primary")
+
+    if run:
+        with st.spinner("Embedding the script and matching…"):
+            matcher = Matcher(search, pipeline_config)
+            placements = matcher.run(segments)
+            stats = matcher.variety_stats(placements)
+
+        matched = [p for p in placements if p.matched]
+        weak = [p for p in matched if p.score < pipeline_config.low_score_threshold]
+
+        st.subheader("Result")
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("lines", len(segments))
+        c2.metric("matched", f"{len(matched)}/{len(placements)}")
+        c3.metric("distinct sources used", stats["unique_sources"])
+        c4.metric("longest same-source run", stats["longest_run"])
+
+        if not matched:
+            st.error("Nothing matched. Try raising the reuse limit above.")
+            return
+
+        if stats["longest_run"] >= 3:
+            st.warning(
+                f"`{stats['longest_run_source']}` appears {stats['longest_run']} "
+                "times in a row. No rule was broken, but it will read as "
+                "repetitive — shorten the variety window to spread it out."
+            )
+        if weak:
+            st.caption(
+                f"{len(weak)} line(s) scored below "
+                f"{pipeline_config.low_score_threshold} and are marked ⚠. The "
+                "catalogue is synthetic and small, so a few real lines have no "
+                "good counterpart in it."
+            )
+
+        degraded = [p for p in placements if p.variety_degraded]
+        if degraded:
+            st.caption(
+                f"{len(degraded)} line(s) could not satisfy the variety rule "
+                "within the chosen window, so it was applied as a penalty "
+                "instead. Shorten the window or use a longer script to spread "
+                "the sources out."
+            )
+
+        for placement in placements:
+            render_placement(placement, pipeline_config)
+
+        st.divider()
+        with st.expander("Download the decision list"):
+            st.caption(
+                "JSON, not a timeline file — see README for why exporting "
+                "OTIO/EDL needs real footage on disk."
+            )
+            rows = [
+                {
+                    "line": p.segment.index + 1,
+                    "start": p.segment.start,
+                    "end": p.segment.end,
+                    "voiceover": p.segment.text,
+                    "clip_id": p.clip["id"] if p.clip else None,
+                    "clip": p.clip["caption"] if p.clip else None,
+                    "score": round(p.score, 4),
+                    "complexity": round(p.complexity, 3),
+                    "pool_size": p.pool_size,
+                }
+                for p in placements
+            ]
+            st.download_button(
+                "matches.json",
+                json.dumps(rows, indent=2),
+                file_name="matches.json",
+                mime="application/json",
+            )
+
+
+if __name__ == "__main__":
+    main()

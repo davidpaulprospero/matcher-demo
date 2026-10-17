@@ -1,0 +1,17 @@
+# Streamlit UI
+streamlit==1.51.0
+
+# Embeddings via ONNX Runtime.
+#
+# Deliberately NOT sentence-transformers/torch: measured peak RSS is 555MB with
+# torch (MiniLM) versus 246MB with ONNX (bge-small-en-v1.5), against a 512MB
+# free tier. See matching/embeddings.py and scripts/check_memory.py. Both are
+# 384-dim sentence encoders of similar size, so the swap costs little quality
+# and is the difference between deploying and not.
+fastembed==0.7.3
+
+# Search + arithmetic
+numpy==2.2.6
+
+# Tests
+pytest==8.4.2

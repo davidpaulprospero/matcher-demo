@@ -1,0 +1,34 @@
+# Render deployment config.
+#
+# Render runs `pip install -r requirements.txt` then `streamlit run app.py`.
+# The custom build command installs CPU-only torch BEFORE that: the default
+# PyPI torch wheel resolves to a build with CUDA bindings, which is ~2.5GB and
+# cannot be installed on a free 512MB instance. `--no-deps` because
+# requirements.txt already pins sentence-transformers, and letting pip resolve
+# twice wastes the whole build.
+#
+# SERVICE TIER AND ITS ACTUAL LIMITS
+#   Free instance: 512MB RAM, sleeps after 15 min idle, ~30-60s cold start on
+#   first request. The catalogue embeddings are committed precisely so that cold
+#   start is "load 1MB of JSON + load MiniLM", not "load MiniLM and encode 269
+#   clips".
+
+services:
+  - type: web
+    name: stock-footage-matcher
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: >
+      pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+      && pip install --no-cache-dir -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: TOKENIZERS_PARALLELISM
+        value: "false"
+      # Streamlit reads its theme and telemetry settings from here.
+      - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+        value: "false"

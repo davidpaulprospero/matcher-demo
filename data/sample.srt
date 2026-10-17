@@ -1,0 +1,59 @@
+1
+00:00:00,000 --> 00:00:04,200
+It started with a simple question.
+
+2
+00:00:04,200 --> 00:00:09,800
+Something that should have taken an afternoon.
+
+3
+00:00:09,800 --> 00:00:11,000
+Instead it took three weeks.
+
+4
+00:00:11,000 --> 00:00:17,400
+I kept a notepad beside my keyboard, and every assumption I had written down turned out to be wrong.
+
+5
+00:00:17,400 --> 00:00:23,600
+Now the pipeline runs on a server in a cold aisle, blinking quietly in the dark.
+
+6
+00:00:23,600 --> 00:00:28,000
+The work is finished, and finished work is easy to measure.
+
+7
+00:00:28,000 --> 00:00:33,400
+A city street after dark, rain on the pavement, nobody waiting for anything in particular.
+
+8
+00:00:33,400 --> 00:00:37,000
+That is the part I did not expect.
+
+9
+00:00:37,000 --> 00:00:43,200
+Someone in the market noticed the machine was slow, and asked why it was slow.
+
+10
+00:00:43,200 --> 00:00:47,600
+I had an answer.
+
+11
+00:00:47,600 --> 00:00:53,000
+Most mornings begin the same way, with the window open and the kettle on.
+
+12
+00:00:53,000 --> 00:00:58,400
+But this one had a train platform in it, and a departure board, and a long grey morning waiting.
+
+13
+00:00:58,400 --> 00:01:03,000
+The lesson was not about speed.
+
+14
+00:01:03,000 --> 00:01:09,500
+It was about noticing that the slow part was never the part you thought it was, and that a hand plane on oak teaches you more about that than any diagram.
+
+15
+00:01:09,500 --> 00:01:15,000
+So I stopped trying to make it faster, and went back to the bench.
