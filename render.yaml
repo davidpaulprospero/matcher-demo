@@ -29,11 +29,12 @@ services:
     runtime: python
     plan: free
     region: oregon
-    # Render's default Python moves over time, and the pinned wheels below
-    # (numpy 2.2.6, fastembed 0.7.3) are resolved against a specific ABI. Naming
-    # the version means a deploy in six months builds what was tested here rather
-    # than whatever the platform default happens to be that week.
-    pythonVersion: "3.12"
+    # Python version is pinned below via the PYTHON_VERSION env var, NOT via a
+    # `pythonVersion:` key. That key does not exist in Render's blueprint spec —
+    # adding it made Render reject the whole file with "A Blueprint file was
+    # found, but there was an issue" and no useful detail. Worth knowing because
+    # the failure is silent-ish: the YAML looks fine and the dashboard gives no
+    # line number.
     # Default start command is `python app.py`, which would start nothing —
     # this is a Streamlit app, so the command must say so.
     #
@@ -43,6 +44,11 @@ services:
     healthCheckPath: /_stcore/health
     autoDeploy: true
     envVars:
+      # Render's default Python moves over time, and the pinned wheels
+      # (numpy 2.2.6, fastembed 0.7.3) are resolved against a specific ABI.
+      # Naming it means a deploy in six months builds what was tested here.
+      - key: PYTHON_VERSION
+        value: "3.12.10"
       - key: PYTHONUNBUFFERED
         value: "1"
       # Sentence tokenisers fork on every encode otherwise; harmless, but it
